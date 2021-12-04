@@ -41,8 +41,6 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import net.fabricmc.fabric.api.networking.v1.PacketSender
-import net.kyori.adventure.platform.fabric.FabricServerAudiences
-import net.kyori.adventure.text.Component
 import net.minecraft.advancement.Advancement
 import net.minecraft.item.ItemStack
 import net.minecraft.item.Items
@@ -55,12 +53,9 @@ import net.minecraft.text.*
 import net.minecraft.util.ActionResult
 import net.minecraft.util.Formatting
 import net.minecraft.util.Util
-import net.minecraft.util.math.MathHelper.clamp
 import org.koin.core.component.inject
-import java.awt.Color.*
 import java.net.URL
 import javax.imageio.ImageIO
-import kotlin.math.ceil
 
 
 class BlockBotApiExtension : Extension(), Bot {
@@ -148,54 +143,37 @@ class BlockBotApiExtension : Extension(), Bot {
             for (attachment in message.attachments) {
                 var hoverEvent: HoverEvent? = null
 
+                val list = NbtList()
+
                 if (appendImages && attachment.isImage && attachment.size < 8 * 1024 * 1024) {
                     val image = ImageIO.read(URL(attachment.data.proxyUrl))
 
-                    val stepSize = (ceil(image.width.toDouble() / 48).toInt()).coerceAtLeast(1)
-                    val stepSquared = stepSize * stepSize;
-                    val width = image.width
-                    val height = image.height
+                    val maxFactor = 48
+                    var divider = 0
 
-                    var x = 0;
+                    for (n in 1 until maxFactor + 1) {if (image.width % n == 0) {divider = n}}
+                    // find highest factor accepted to ensure image is centred
+
+                    val wStepSize = (image.width.toFloat() / divider).toInt()
+                    val scanLines = (divider * wStepSize) * (image.height / wStepSize)
+                    var text = LiteralText("").setStyle(Style.EMPTY.withItalic(false))
+
                     var y = 0
-
-                    val list = NbtList()
-
-                    while (y < height) {
-                        val text = LiteralText("").setStyle(Style.EMPTY.withItalic(false))
-                        while (x < width) {
-                            var rgb: Int
-
-                            if (interpolateImages && stepSize != 1) {
-                                var r = 0;
-                                var g = 0;
-                                var b = 0;
-
-                                for (x2 in 0 until stepSize) {
-                                    for (y2 in 0 until stepSize) {
-                                        val color = image.getRGB(clamp(x + x2, 0, width - 1), clamp(y + y2, 0, height - 1))
-                                        r += color.and(0xff0000).shr(16)
-                                        g += color.and(0x00ff00).shr(8)
-                                        b += color.and(0x0000ff)
-                                    }
-                                }
-
-                                rgb = r / stepSquared
-                                rgb = (rgb.shl( 8)) + g / stepSquared
-                                rgb = (rgb.shl(8)) + b / stepSquared
-                            } else {
-                                rgb = image.getRGB(x, y).and(0xffffff)
-                            }
-                            val pixel = LiteralText("█").setStyle(Style.EMPTY.withColor(rgb))
-                            text.append(pixel)
-                            x += stepSize
+                    for (steppedPx in 0 until scanLines step wStepSize ) {
+                        val x = steppedPx % (wStepSize * divider)
+                        if (x == 0 && steppedPx != 0) {
+                            y += wStepSize
+                            list.add(NbtString.of(Text.Serializer.toJson(text)))
+                            text = LiteralText("").setStyle(Style.EMPTY.withItalic(false))
                         }
+                        if (interpolateImages && wStepSize != 1) {
 
-                        list.add(NbtString.of(Text.Serializer.toJson(text)))
-                        y += stepSize
-                        x = 0
+                        }
+                        else{
+                            val rgb = image.getRGB(x, y).and(0xffffff)
+                            text.append(LiteralText("█").setStyle(Style.EMPTY.withColor(rgb)))
+                        }
                     }
-
                     val stack = ItemStack(Items.STICK)
                     val display = stack.getOrCreateSubNbt("display")
 
@@ -228,6 +206,7 @@ class BlockBotApiExtension : Extension(), Bot {
 
         return listOf(config.getMinecraftChatRelayMsg(username, topRoleMessage, content, server), *attachments.toTypedArray())
     }
+
 
     suspend fun createDiscordEmbed(builder: EmbedBuilder.() -> Unit) {
         if (config[ChatRelaySpec.WebhookSpec.useWebhook]) {
