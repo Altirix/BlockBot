@@ -54,6 +54,7 @@ import net.minecraft.util.ActionResult
 import net.minecraft.util.Formatting
 import net.minecraft.util.Util
 import org.koin.core.component.inject
+import java.awt.image.DataBufferByte
 import java.net.URL
 import javax.imageio.ImageIO
 
@@ -150,34 +151,46 @@ class BlockBotApiExtension : Extension(), Bot {
                     val maxFactor = 48
                     var dividerW = 0
 
-                    for (n in maxFactor downTo 1) {
-                        if (image.width % n == 0) {
+                    for (n in maxFactor downTo 1) { // find a factor that will fit with the image
+                        if (image.width > 256 &&image.width % n > n/2) { // large images
+                            dividerW = n
+                            break
+                        } else if (image.width % n == 0) { // small images
                             dividerW = n
                             break
                         }
                     }
-                    // find highest factor accepted to ensure image is fully resized
+                    val stepSize = image.width / dividerW
+                    val steppedWidth = stepSize * dividerW
 
-                    val stepSize = (image.width.toFloat() / dividerW).toInt()
+                    val imageData = (image.raster.dataBuffer as DataBufferByte).data.asList()
 
-                    for (steppedY in 0 until image.height step stepSize) {
-                        val text = LiteralText("").setStyle(Style.EMPTY.withItalic(false))
-                        for (steppedX in 0 until image.width step stepSize) {
-                            if (interpolateImages && stepSize != 1) {
+                    val pixels = if (image.alphaRaster == null) {
+                        imageData.chunked(3) { -16777216 + it[0].toInt().and(0xff) +
+                            (it[1].toInt() shl 8.and(0xff)) + (it[2].toInt() shl 16.and(0xff)) }
+                    }else{
+                        imageData.chunked(4) { (it[0].toInt() shl 24.and(0xff)) +
+                            it[1].toInt().and(0xff) + (it[2].toInt() shl 8.and(0xff)) +
+                            (it[3].toInt() shl 16.and(0xff)) }
+                    }
 
-                            } else {
-                                var rgb = image.getRGB(steppedX, steppedY)
-                                var pixel = "█"
-                                if (rgb == 0) {rgb = 0xffffff; pixel = "▒"} // transparent = dithered white
-                                text.append(LiteralText(pixel).setStyle(Style.EMPTY.withColor(rgb.and(0xffffff))))
+                    var text = LiteralText("").setStyle(Style.EMPTY.withItalic(false))
+
+                    pixels.filterIndexed { i, _ -> i % stepSize == 0 && i % (image.width * stepSize) < steppedWidth}
+                        .forEachIndexed { index, rgb ->
+                            if (index % (steppedWidth/stepSize) == 0) {
+                                list.add(NbtString.of(Text.Serializer.toJson(text)))
+                                text = LiteralText("").setStyle(Style.EMPTY.withItalic(false))
+                            }else {
+                                text.append(LiteralText(if (rgb == 0) "▒" else "█").setStyle(Style.EMPTY.withColor(rgb.and(0xffffff))))
                             }
                         }
-                        list.add(NbtString.of(Text.Serializer.toJson(text)))
-                    }
+
                     val stack = ItemStack(Items.STICK)
                     val display = stack.getOrCreateSubNbt("display")
 
                     display.put("Lore", list)
+
 
 
                     stack.setCustomName(LiteralText.EMPTY)
