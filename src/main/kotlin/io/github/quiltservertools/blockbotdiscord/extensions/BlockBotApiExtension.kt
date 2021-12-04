@@ -56,7 +56,6 @@ import net.minecraft.util.Util
 import org.koin.core.component.inject
 import java.net.URL
 import javax.imageio.ImageIO
-import kotlin.system.measureTimeMillis
 
 
 class BlockBotApiExtension : Extension(), Bot {
@@ -147,38 +146,34 @@ class BlockBotApiExtension : Extension(), Bot {
 
                 if (appendImages && attachment.isImage && attachment.size < 8 * 1024 * 1024) {
                     val image = ImageIO.read(URL(attachment.data.proxyUrl))
-                    val timeInMillis = measureTimeMillis {
-                        val maxFactor = 48
-                        var divider = 0
 
-                        for (n in 1 until maxFactor + 1) {
-                            if (image.width % n == 0) {
-                                divider = n
-                            }
-                        }
-                        // find highest factor accepted to ensure image is centred
+                    val maxFactor = 48
+                    var dividerW = 0
 
-                        val wStepSize = (image.width.toFloat() / divider).toInt()
-                        val scanLines = (divider * wStepSize) * (image.height / wStepSize)
-                        var text = LiteralText("").setStyle(Style.EMPTY.withItalic(false))
-
-                        var y = 0
-                        for (steppedPx in 0 until scanLines step wStepSize) {
-                            val x = steppedPx % (wStepSize * divider)
-                            if (x == 0 && steppedPx != 0) {
-                                y += wStepSize
-                                list.add(NbtString.of(Text.Serializer.toJson(text)))
-                                text = LiteralText("").setStyle(Style.EMPTY.withItalic(false))
-                            }
-                            if (interpolateImages && wStepSize != 1) {
-
-                            } else {
-                                val rgb = image.getRGB(x, y).and(0xffffff)
-                                text.append(LiteralText("█").setStyle(Style.EMPTY.withColor(rgb)))
-                            }
+                    for (n in maxFactor downTo 1) {
+                        if (image.width % n == 0) {
+                            dividerW = n
+                            break
                         }
                     }
-                    BlockBotDiscord.logger.info("(The operation took $timeInMillis ms)")
+                    // find highest factor accepted to ensure image is fully resized
+
+                    val stepSize = (image.width.toFloat() / dividerW).toInt()
+
+                    for (steppedY in 0 until image.height step stepSize) {
+                        val text = LiteralText("").setStyle(Style.EMPTY.withItalic(false))
+                        for (steppedX in 0 until image.width step stepSize) {
+                            if (interpolateImages && stepSize != 1) {
+
+                            } else {
+                                var rgb = image.getRGB(steppedX, steppedY)
+                                var pixel = "█"
+                                if (rgb == 0) {rgb = 0xffffff; pixel = "▒"} // transparent = dithered white
+                                text.append(LiteralText(pixel).setStyle(Style.EMPTY.withColor(rgb.and(0xffffff))))
+                            }
+                        }
+                        list.add(NbtString.of(Text.Serializer.toJson(text)))
+                    }
                     val stack = ItemStack(Items.STICK)
                     val display = stack.getOrCreateSubNbt("display")
 
